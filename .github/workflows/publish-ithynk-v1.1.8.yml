@@ -1,0 +1,36 @@
+name: Publish iThynk v1.1.8
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-ithynk-v1.1.8.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified installer artifact
+        env:
+          ARTIFACT_URL: "https://sdmntprbrazilsouth.oaiusercontent.com/files/00000000-d8bc-820e-8641-049fa865a2e3/raw?se=2026-09-17T16%3A26%3A21Z&sp=r&sv=2026-02-06&sr=b&scid=da03373b-b231-5f43-93c0-f0e29e4accbf&skoid=127c13cb-e695-43ea-b6b2-0a863d41dbf7&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-17T10%3A43%3A42Z&ske=2026-09-18T10%3A43%3A42Z&sks=b&skv=2026-02-06&sig=GRPR%2BqTmeMYNJBjlEJ19SaWsskfqIlvLiWlZCNlncgA%3D"
+        run: |
+          curl --fail --location --retry 3 "$ARTIFACT_URL" -o artifact.zip
+          echo "22b37c7d72120284e7aa99beda07263c66cab876504df92c90413457cbf08db8  artifact.zip" | sha256sum -c -
+          unzip -q artifact.zip -d unpacked
+          test -f unpacked/iThynk-Setup-v1.1.8.exe
+          test $(stat -c%s unpacked/iThynk-Setup-v1.1.8.exe) -gt 200000000
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete v1.1.8 --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create v1.1.8 unpacked/iThynk-Setup-v1.1.8.exe \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "iThynk v1.1.8" \
+            --notes "Windows installer for iThynk v1.1.8. Chromium is bundled. Human DC/Admin assessment remains required." \
+            --latest
