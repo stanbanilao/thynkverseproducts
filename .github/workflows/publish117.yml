@@ -1,0 +1,30 @@
+name: Publish117
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download package
+        shell: bash
+        run: |
+          curl -fL --retry 3 'https://sdmntprbrazilsouth.oaiusercontent.com/files/00000000-fad8-820e-98c3-ebb1ab83d58e/raw?se=2026-09-17T06%3A16%3A48Z&sp=r&sv=2026-02-06&sr=b&scid=b580ac53-1494-5318-b10e-0883e86511f7&skoid=127c13cb-e695-43ea-b6b2-0a863d41dbf7&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-16T20%3A12%3A05Z&ske=2026-09-17T20%3A12%3A05Z&sks=b&skv=2026-02-06&sig=tv5H8YnncKuuyaps%2BnpJEn1lWjdsKderSJZt/zwzB68%3D' -o iThynk-v1.1.7-Windows.zip
+          test $(stat -c%s iThynk-v1.1.7-Windows.zip) -gt 300000000
+          unzip -t iThynk-v1.1.7-Windows.zip >/dev/null
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view v1.1.7 >/dev/null 2>&1; then
+            gh release upload v1.1.7 iThynk-v1.1.7-Windows.zip --clobber
+          else
+            gh release create v1.1.7 iThynk-v1.1.7-Windows.zip --title 'iThynk v1.1.7' --notes 'iThynk v1.1.7 DC Evidence & Reconciliation for Windows. Chromium is bundled.'
+          fi
