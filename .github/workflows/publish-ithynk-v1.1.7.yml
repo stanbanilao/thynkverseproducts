@@ -1,0 +1,129 @@
+name: Publish iThynk v1.1.7
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-ithynk-v1.1.7.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      SOURCE_URL: "https://sdmntprbrazilsouth.oaiusercontent.com/files/00000000-063c-820e-a9df-cd98b1ec954b/raw?se=2026-09-17T05%3A47%3A29Z&sp=r&sv=2026-02-06&sr=b&scid=e067758a-08df-52fa-81aa-5da76adf6f6a&skoid=127c13cb-e695-43ea-b6b2-0a863d41dbf7&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-17T03%3A10%3A22Z&ske=2026-09-18T03%3A10%3A22Z&sks=b&skv=2026-02-06&sig=9yaZPeKuNVaLZbJJo5RYsJVDO2frSig0CRTwuOSimb0%3D"
+      TAG: ithynk-v1.1.7
+      APP_VERSION: 1.1.7
+
+    steps:
+      - name: Check out distribution repository
+        uses: actions/checkout@v5
+
+      - name: Download verified private build
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "iThynk-v1.1.7-Portable.zip"
+          Invoke-WebRequest -Uri $env:SOURCE_URL -OutFile $zip
+          $size = (Get-Item $zip).Length
+          Write-Host "Downloaded bytes: $size"
+          if ($size -lt 300000000) { throw "Downloaded iThynk package is incomplete: $size bytes." }
+          "PORTABLE_ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Extract portable app
+        shell: pwsh
+        run: |
+          $extract = Join-Path $env:RUNNER_TEMP "ithynk-v117"
+          if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
+          Expand-Archive -Path $env:PORTABLE_ZIP -DestinationPath $extract -Force
+          $exe = Get-ChildItem $extract -Recurse -Filter "iThynk-v1.1.7.exe" | Select-Object -First 1
+          if (-not $exe) { throw "iThynk-v1.1.7.exe was not found in the verified package." }
+          $chrome = Get-ChildItem $extract -Recurse -Filter "chrome.exe" | Select-Object -First 1
+          if (-not $chrome) { throw "Bundled Chromium is missing from the portable package." }
+          "APP_DIR=$($exe.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "App folder: $($exe.Directory.FullName)"
+          Write-Host "Bundled Chromium: $($chrome.FullName)"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Could not install Inno Setup." }
+
+      - name: Build single Windows installer
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "ithynk-installer"
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          $iss = Join-Path $env:RUNNER_TEMP "ithynk-v117.iss"
+          $appDir = $env:APP_DIR.Replace('\','\\')
+          $outEsc = $out.Replace('\','\\')
+          $icon = Get-ChildItem $env:APP_DIR -Recurse -Filter "ithynk_it.ico" | Select-Object -First 1
+          $iconLine = ""
+          if ($icon) { $iconLine = "SetupIconFile=$($icon.FullName)" }
+          @"
+[Setup]
+AppId={{A2F95458-3B8B-4AE6-9CD4-ITHYNK117001}
+AppName=iThynk
+AppVersion=$env:APP_VERSION
+AppPublisher=Thynkverse
+DefaultDirName={autopf}\Thynkverse\iThynk
+DefaultGroupName=iThynk
+OutputDir=$out
+OutputBaseFilename=iThynk-Setup-v$env:APP_VERSION
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+ArchitecturesAllowed=x64compatible
+PrivilegesRequired=lowest
+UninstallDisplayIcon={app}\iThynk-v1.1.7.exe
+$iconLine
+
+[Files]
+Source: "$env:APP_DIR\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{autoprograms}\iThynk"; Filename: "{app}\iThynk-v1.1.7.exe"
+Name: "{autodesktop}\iThynk"; Filename: "{app}\iThynk-v1.1.7.exe"
+
+[Run]
+Filename: "{app}\iThynk-v1.1.7.exe"; Description: "Launch iThynk"; Flags: nowait postinstall skipifsilent
+"@ | Set-Content -Path $iss -Encoding utf8
+
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler was not found." }
+          & $iscc $iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
+          $setup = Join-Path $out "iThynk-Setup-v1.1.7.exe"
+          if (-not (Test-Path $setup)) { throw "Installer was not created." }
+          "SETUP_EXE=$setup" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Installer bytes: $((Get-Item $setup).Length)"
+
+      - name: Publish public stable release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+iThynk v1.1.7 - DC Evidence & Reconciliation
+
+Windows desktop release by Thynkverse.
+
+Includes the bundled Chromium runtime so customers do not install Python, Playwright or Chromium separately.
+
+Download iThynk-Setup-v1.1.7.exe for the normal Windows install.
+The portable ZIP is also provided as a fallback.
+
+Human DC/Admin assessment remains required.
+"@
+          gh release view $env:TAG 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG "$env:SETUP_EXE" "$env:PORTABLE_ZIP" --clobber
+          } else {
+            gh release create $env:TAG "$env:SETUP_EXE" "$env:PORTABLE_ZIP" --title "iThynk v1.1.7" --notes $notes --latest
+          }
+          if ($LASTEXITCODE -ne 0) { throw "GitHub public release publishing failed." }
