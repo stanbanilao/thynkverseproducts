@@ -2,6 +2,8 @@ name: Publish117
 
 on:
   push:
+    paths:
+      - ".github/workflows/publish117.yml"
   workflow_dispatch:
 
 permissions:
@@ -9,22 +11,95 @@ permissions:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download package
-        shell: bash
-        run: |
-          curl -fL --retry 3 'https://sdmntprbrazilsouth.oaiusercontent.com/files/00000000-fad8-820e-98c3-ebb1ab83d58e/raw?se=2026-09-17T06%3A16%3A48Z&sp=r&sv=2026-02-06&sr=b&scid=b580ac53-1494-5318-b10e-0883e86511f7&skoid=127c13cb-e695-43ea-b6b2-0a863d41dbf7&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-16T20%3A12%3A05Z&ske=2026-09-17T20%3A12%3A05Z&sks=b&skv=2026-02-06&sig=tv5H8YnncKuuyaps%2BnpJEn1lWjdsKderSJZt/zwzB68%3D' -o iThynk-v1.1.7-Windows.zip
-          test $(stat -c%s iThynk-v1.1.7-Windows.zip) -gt 300000000
-          unzip -t iThynk-v1.1.7-Windows.zip >/dev/null
+    runs-on: windows-latest
+    timeout-minutes: 40
 
-      - name: Publish release
+    steps:
+      - name: Download public package parts
+        shell: pwsh
+        run: |
+          $urls = @(
+            'https://remedydebts-my.sharepoint.com/:u:/g/personal/stan_thynkverse_co_za/IQAB9gm5R6nAT5lw2QTGy3v3AXUyGskfW_TJg8m7AtN9_og?download=1',
+            'https://remedydebts-my.sharepoint.com/:u:/g/personal/stan_thynkverse_co_za/IQCD5H9c3lBGT7qobI3AJYjmARFLO5VfpAKLYnk-7PMWtGM?download=1',
+            'https://remedydebts-my.sharepoint.com/:u:/g/personal/stan_thynkverse_co_za/IQDPzsKNkKNsRJtMlzqc_y-lAdTQmeWCPjj2IqS7A3pcxIQ?download=1'
+          )
+          for ($i=0; $i -lt $urls.Count; $i++) {
+            $name = ('part{0:d2}' -f $i)
+            Invoke-WebRequest -Uri $urls[$i] -OutFile $name -MaximumRedirection 10
+            if (-not (Test-Path $name)) { throw "Missing downloaded part $name" }
+            Write-Host "$name bytes: $((Get-Item $name).Length)"
+          }
+
+      - name: Reassemble and verify portable package
+        shell: pwsh
+        run: |
+          cmd /c "copy /b part00+part01+part02 iThynk-v1.1.7-Windows.zip"
+          if ($LASTEXITCODE -ne 0) { throw "Could not reassemble iThynk package." }
+          $size = (Get-Item 'iThynk-v1.1.7-Windows.zip').Length
+          Write-Host "Reassembled ZIP bytes: $size"
+          if ($size -lt 300000000) { throw "Reassembled package is incomplete: $size bytes." }
+          $extract = Join-Path $env:RUNNER_TEMP 'ithynk-v117'
+          Expand-Archive -Path 'iThynk-v1.1.7-Windows.zip' -DestinationPath $extract -Force
+          $exe = Get-ChildItem $extract -Recurse -Filter 'iThynk-v1.1.7.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'iThynk-v1.1.7.exe is missing from package.' }
+          $chrome = Get-ChildItem $extract -Recurse -Filter 'chrome.exe' | Select-Object -First 1
+          if (-not $chrome) { throw 'Bundled Chromium is missing from package.' }
+          "APP_DIR=$($exe.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Verified app: $($exe.FullName)"
+          Write-Host "Verified browser: $($chrome.FullName)"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+
+      - name: Build one-click Windows installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          $iss = Join-Path $env:RUNNER_TEMP 'ithynk-v117.iss'
+          $out = (Resolve-Path 'release').Path
+          @"
+[Setup]
+AppId={{A2F95458-3B8B-4AE6-9CD4-117001117001}
+AppName=iThynk
+AppVersion=1.1.7
+AppPublisher=Thynkverse
+DefaultDirName={localappdata}\Thynkverse\iThynk
+DefaultGroupName=iThynk
+OutputDir=$out
+OutputBaseFilename=iThynk-Setup-v1.1.7
+Compression=lzma2/max
+SolidCompression=yes
+WizardStyle=modern
+PrivilegesRequired=lowest
+UninstallDisplayIcon={app}\iThynk-v1.1.7.exe
+
+[Files]
+Source: "$env:APP_DIR\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{autoprograms}\iThynk"; Filename: "{app}\iThynk-v1.1.7.exe"
+Name: "{autodesktop}\iThynk"; Filename: "{app}\iThynk-v1.1.7.exe"
+
+[Run]
+Filename: "{app}\iThynk-v1.1.7.exe"; Description: "Launch iThynk"; Flags: nowait postinstall skipifsilent
+"@ | Set-Content -Path $iss -Encoding utf8
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' $iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
+          if (-not (Test-Path 'release\iThynk-Setup-v1.1.7.exe')) { throw 'Installer was not created.' }
+          Copy-Item 'iThynk-v1.1.7-Windows.zip' 'release\iThynk-v1.1.7-Windows.zip' -Force
+
+      - name: Publish public stable release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
+        shell: pwsh
         run: |
-          if gh release view v1.1.7 >/dev/null 2>&1; then
-            gh release upload v1.1.7 iThynk-v1.1.7-Windows.zip --clobber
-          else
-            gh release create v1.1.7 iThynk-v1.1.7-Windows.zip --title 'iThynk v1.1.7' --notes 'iThynk v1.1.7 DC Evidence & Reconciliation for Windows. Chromium is bundled.'
-          fi
+          gh release delete v1.1.7 --yes 2>$null
+          gh release create v1.1.7 `
+            'release\iThynk-Setup-v1.1.7.exe' `
+            'release\iThynk-v1.1.7-Windows.zip' `
+            --title 'iThynk v1.1.7' `
+            --notes 'iThynk v1.1.7 DC Evidence & Reconciliation for Windows. Use iThynk-Setup-v1.1.7.exe for the easiest installation. Chromium is bundled. Human DC/Admin assessment remains required.' `
+            --latest
