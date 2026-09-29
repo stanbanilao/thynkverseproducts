@@ -16,7 +16,22 @@
   qsa('.nav-links a').forEach(a=>a.addEventListener('click',()=>{
     links?.classList.remove('open');
     menu?.setAttribute('aria-expanded','false');
+    qsa('.download-menu[open]').forEach(d=>d.removeAttribute('open'));
   }));
+
+  const downloadMenus=qsa('.download-menu');
+  document.addEventListener('click',e=>{
+    downloadMenus.forEach(d=>{
+      if(d.open&&!d.contains(e.target))d.removeAttribute('open');
+    });
+  });
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){
+      downloadMenus.forEach(d=>d.removeAttribute('open'));
+      links?.classList.remove('open');
+      menu?.setAttribute('aria-expanded','false');
+    }
+  });
 
   const io=new IntersectionObserver(entries=>entries.forEach(entry=>{
     if(entry.isIntersecting){entry.target.classList.add('in');io.unobserve(entry.target)}
