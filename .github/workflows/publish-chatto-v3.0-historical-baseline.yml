@@ -1,0 +1,40 @@
+name: Publish Chatto 3.0 Historical Baseline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-chatto-v3.0-historical-baseline.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download verified private-build artifact
+        env:
+          ARTIFACT_URL: "https://sdmntprbrazilsouth.oaiusercontent.com/files/00000000-1094-820e-a1c2-ef6ce16a532a/raw?se=2026-10-02T16%3A28%3A08Z&sp=r&sv=2026-02-06&sr=b&scid=dddb84da-1bee-5622-8b5c-7475c9483255&skoid=9fcafdab-1a9a-48a1-833e-6f0dce81fc66&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-02T10%3A02%3A15Z&ske=2026-10-03T10%3A02%3A15Z&sks=b&skv=2026-02-06&sig=iorasqGxmE5wm/ZUK9qRzlcNde6Zvs8GX0Qv2opVtpQ%3D"
+        run: |
+          curl --fail --location --retry 3 "$ARTIFACT_URL" -o artifact.zip
+          echo "9c55919d6bc4798a92fbd69d46df54815d65c06ef9a4dd9b04d9ae0b92a04fb8  artifact.zip" | sha256sum -c -
+          unzip -q artifact.zip -d unpacked
+          find unpacked -maxdepth 3 -type f -print
+          test -f unpacked/Chatto-Version-3.0-Setup.exe
+          test -f unpacked/Chatto-Version-3.0-Setup.sha256.txt
+          test -f unpacked/HISTORICAL-BASELINE-BUILD-INFO.txt
+          test $(stat -c%s unpacked/Chatto-Version-3.0-Setup.exe) -eq 72783620
+          echo "d307122e6c5c3cdc396bd436eb88132187c7443c9b14e9ccfb6164e471b64004  unpacked/Chatto-Version-3.0-Setup.exe" | sha256sum -c -
+          recorded=$(tr '[:upper:]' '[:lower:]' < unpacked/Chatto-Version-3.0-Setup.sha256.txt | tr -d '\r\n ')
+          test "$recorded" = "d307122e6c5c3cdc396bd436eb88132187c7443c9b14e9ccfb6164e471b64004"
+
+      - name: Publish controlled historical baseline prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="chatto-v3.0-historical-baseline-20261002"
+          gh release delete "$TAG" --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create "$TAG"             unpacked/Chatto-Version-3.0-Setup.exe             unpacked/Chatto-Version-3.0-Setup.sha256.txt             unpacked/HISTORICAL-BASELINE-BUILD-INFO.txt             --repo "$GITHUB_REPOSITORY"             --title "Chatto 3.0 Historical Baseline"             --notes "Controlled historical-baseline verification artifact for Chatto 3.0. Built from private source commit a655c3dc317961b674e7cbd9a74fc8e79c0ac081. Tests: 80/80 PASS. Installer SHA-256: d307122e6c5c3cdc396bd436eb88132187c7443c9b14e9ccfb6164e471b64004. This is NOT a LIVE/stable release. It preserves the legacy .tsflic licensing path and historical PRODUCT_CODE=THYNKWAQ for baseline verification only. Super Control CHATTO/BASE migration is not included."             --prerelease
