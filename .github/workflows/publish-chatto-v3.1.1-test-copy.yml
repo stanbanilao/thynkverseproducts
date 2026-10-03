@@ -1,0 +1,58 @@
+name: Publish Chatto 3.1.1 TEST Copy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-chatto-v3.1.1-test-copy.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  publish-test-copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download and verify controlled TEST artifact
+        env:
+          ARTIFACT_URL: "https://sdmntprbrazilsouth.oaiusercontent.com/files/00000000-d770-820e-b51c-b3de593b679a/raw?se=2026-10-03T10%3A50%3A54Z&sp=r&sv=2026-02-06&sr=b&scid=14356997-e54c-5e12-9f16-c02429b958a7&skoid=9fcafdab-1a9a-48a1-833e-6f0dce81fc66&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-02T19%3A51%3A42Z&ske=2026-10-03T19%3A51%3A42Z&sks=b&skv=2026-02-06&sig=a3hLMGX1H7TPgjT5wpJE4C6Xmh71%2BMxQHPZ5eJXf%2Bmo%3D"
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 "$ARTIFACT_URL" -o artifact.zip
+          echo "d74170078d242c2ef92f6379cd88086ce7837c6545f8809570bed975a943e11d  artifact.zip" | sha256sum -c -
+          unzip -q artifact.zip -d unpacked
+          find unpacked -maxdepth 3 -type f -print
+          test -f unpacked/USB-READY/Chatto-Version-3.1.1-TEST-Setup.exe
+          test -f unpacked/USB-READY/Chatto-Version-3.1.1-TEST-Setup.sha256.txt
+          test -f unpacked/USB-READY/CHATTO-3.1.1-TEST-BUILD-INFO.txt
+          test $(stat -c%s unpacked/USB-READY/Chatto-Version-3.1.1-TEST-Setup.exe) -eq 259316610
+          echo "ade37822e38339f1fed687a0ab04520cd1602d24a9c108812a5d7781dd673943  unpacked/USB-READY/Chatto-Version-3.1.1-TEST-Setup.exe" | sha256sum -c -
+          recorded=$(tr '[:upper:]' '[:lower:]' < unpacked/USB-READY/Chatto-Version-3.1.1-TEST-Setup.sha256.txt | tr -d '\r\n ')
+          test "$recorded" = "ade37822e38339f1fed687a0ab04520cd1602d24a9c108812a5d7781dd673943"
+          grep -q "Version=3.1.1" unpacked/USB-READY/CHATTO-3.1.1-TEST-BUILD-INFO.txt
+          grep -q "ProductCode=CHATTO" unpacked/USB-READY/CHATTO-3.1.1-TEST-BUILD-INFO.txt
+          grep -q "ModelCode=BASE" unpacked/USB-READY/CHATTO-3.1.1-TEST-BUILD-INFO.txt
+          grep -q "Environment=TEST" unpacked/USB-READY/CHATTO-3.1.1-TEST-BUILD-INFO.txt
+          grep -q "SourceCommit=e38a836b236f900de9b9193e6960635a3ade8845" unpacked/USB-READY/CHATTO-3.1.1-TEST-BUILD-INFO.txt
+
+      - name: Publish controlled TEST prerelease to download repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="chatto-v3.1.1-test-20261003"
+          gh release delete "$TAG" --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create "$TAG"             unpacked/USB-READY/Chatto-Version-3.1.1-TEST-Setup.exe             unpacked/USB-READY/Chatto-Version-3.1.1-TEST-Setup.sha256.txt             unpacked/USB-READY/CHATTO-3.1.1-TEST-BUILD-INFO.txt             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "Chatto 3.1.1 TEST"             --notes "CONTROLLED TEST COPY — NOT DEMO / NOT LIVE. ProductCode=CHATTO; ModelCode=BASE; Environment=TEST; ReleaseChannel=TEST. Exact verified copy of the private Chatto TEST artifact built from source commit e38a836b236f900de9b9193e6960635a3ade8845, workflow run 37098093951. Regression suite PASS; Windows packaged activation smoke PASS. Installer SHA-256: ade37822e38339f1fed687a0ab04520cd1602d24a9c108812a5d7781dd673943. This prerelease is not the public LIVE/latest Chatto download."             --prerelease             --latest=false
+
+      - name: Verify the published download-repo copy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/stanbanilao/thynkverseproducts/releases/download/chatto-v3.1.1-test-20261003/Chatto-Version-3.1.1-TEST-Setup.exe"
+          curl --fail --location --retry 3 "$URL" -o public-copy.exe
+          test $(stat -c%s public-copy.exe) -eq 259316610
+          echo "ade37822e38339f1fed687a0ab04520cd1602d24a9c108812a5d7781dd673943  public-copy.exe" | sha256sum -c -
+          gh release view "chatto-v3.1.1-test-20261003" --repo "$GITHUB_REPOSITORY" --json tagName,name,isPrerelease,url,assets
