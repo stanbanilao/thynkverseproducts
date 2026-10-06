@@ -1,0 +1,38 @@
+name: Remove Non-LIVE Chatto Public Releases
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/remove-non-live-chatto-public-releases.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Remove Chatto non-LIVE releases from public download repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for tag in             "chatto-v3.0-historical-baseline-20261002"             "chatto-v3.1.1-test-20261003"             "chatto-v3.1.2-test-20261003"
+          do
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          done
+
+      - name: Verify no public Chatto non-LIVE release remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          releases=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,name,isPrerelease)
+          echo "$releases"
+          if echo "$releases" | jq -e '.[] | select((.tagName|ascii_downcase|contains("chatto")) and ((.tagName|ascii_downcase|contains("test")) or (.tagName|ascii_downcase|contains("demo")) or (.tagName|ascii_downcase|contains("historical"))))' >/dev/null; then
+            echo "A non-LIVE Chatto public release still exists." >&2
+            exit 1
+          fi
