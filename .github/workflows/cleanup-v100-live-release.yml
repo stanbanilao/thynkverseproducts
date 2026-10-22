@@ -1,0 +1,32 @@
+name: Retire obsolete Thynkly v1.0.0 LIVE release
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cleanup-v100-live-release.yml'
+permissions:
+  contents: write
+jobs:
+  retire-thynkly-v100:
+    if: github.repository == 'stanbanilao/thynkverseproducts' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only the approved obsolete v1.0.0 Thynkly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG='thynkly-leadgen-v1.0.0-live'
+          echo "Checking $REPO / $TAG"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release delete "$TAG" --repo "$REPO" --yes
+            echo "Deleted obsolete release $TAG; Git tag and source history are retained."
+          else
+            echo "The approved obsolete release $TAG is already absent."
+          fi
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "ERROR: old release is still present."
+            exit 1
+          fi
+          echo "Only $TAG was targeted. v1.0.1 and v1.0.2 were not modified."
